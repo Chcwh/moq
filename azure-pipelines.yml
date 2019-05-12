@@ -1,42 +1,75 @@
-queue: Hosted VS2017
+stages:
 
-steps:
+- stage: Build
+  jobs:
 
-- checkout: self
-  clean: true
+  - job: Build
+    pool: Hosted VS2017
+    steps:
+    - checkout: self
+      clean: true
 
-- task: MSBuild@1
-  displayName: Restore
-  inputs:
-    solution: src/Moq.sln
-    msbuildArguments: /t:Restore /p:Configuration=Release /m
+    - task: MSBuild@1
+      displayName: Restore
+      inputs:
+        solution: src/Moq.sln
+        configuration: Release
+        msbuildArguments: /t:Restore /m /bl:$(Build.ArtifactStagingDirectory)\logs\restore.binlog
 
-- task: MSBuild@1
-  displayName: Version
-  inputs:
-    solution: src/Moq/Moq.Package/Moq.Package.msbuildproj
-    msbuildArguments: /t:Version /bl:"$(Build.ArtifactStagingDirectory)\version.binlog"
+    - task: MSBuild@1
+      displayName: Version
+      inputs:
+        solution: src/Moq/Moq.Package/Moq.Package.msbuildproj
+        msbuildArguments: /t:Version /bl:$(Build.ArtifactStagingDirectory)\logs\version.binlog
 
-- task: MSBuild@1
-  displayName: Build
-  inputs:
-    solution: src/Moq.sln
-    msbuildArguments: /bl:"$(Build.ArtifactStagingDirectory)\build.binlog" /p:PackOnBuild=true /p:PackageOutputPath=$(Build.ArtifactStagingDirectory) /p:Configuration=Release
+    - task: MSBuild@1
+      displayName: Build
+      inputs:
+        solution: src/Moq.sln
+        configuration: Release
+        msbuildArguments: /p:PackOnBuild=true /p:PackageOutputPath=$(Build.ArtifactStagingDirectory)\pkg /bl:"$(Build.ArtifactStagingDirectory)\logs\build.binlog" 
 
-- task: VSTest@2
-  displayName: Test
-  inputs:
-    testAssemblyVer2: src\*\*\bin\*\*.Tests.dll
-    runInParallel: 'true'
-    codeCoverageEnabled: 'true'
-    publishRunAttachments: 'true'
-    diagnosticsEnabled: false
-    rerunFailedTests: true
+    - task: VSTest@2
+      displayName: Test
+      inputs:
+        testAssemblyVer2: src\*\*\bin\*\*.Tests.dll
+        runInParallel: 'true'
+        codeCoverageEnabled: 'true'
+        publishRunAttachments: 'true'
+        diagnosticsEnabled: false
+        rerunFailedTests: true
     
-- task: PublishBuildArtifacts@1
-  displayName: Publish Artifact
-  inputs:
-    PathtoPublish: $(Build.ArtifactStagingDirectory)
-    ArtifactName: out
-    ArtifactType: Container
-  condition: always()
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Packages
+      inputs:
+        PathtoPublish: $(Build.ArtifactStagingDirectory)\pkg
+        ArtifactName: packages
+        ArtifactType: Container
+      condition: always()
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Logs
+      inputs:
+        PathtoPublish: $(Build.ArtifactStagingDirectory)\logs
+        ArtifactName: logs
+        ArtifactType: Container
+      condition: always()
+
+- stage: Deploy
+  jobs:
+  - deployment: Deploy
+    pool: Hosted VS2017
+    environment: kzu.nuget.cloud
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DotNetCoreCLI@2
+            displayName: 'install sleet'
+            inputs:
+            command: custom
+            custom: tool
+            arguments: 'install -g --version 2.3.79 sleet'
+
+          - script: 'sleet push --config none $(Build.DefinitionName)\packages -f --verbose -p "SLEET_FEED_CONNECTIONSTRING=$(SLEET_FEED_CONNECTIONSTRING)"'
+            displayName: 'sleet push'  
