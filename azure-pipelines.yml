@@ -59,7 +59,7 @@ stages:
   jobs:
   - deployment: Deploy
     pool: Hosted VS2017
-    environment: 'kzu.nuget.cloud'
+    environment: kzu-nuget-cloud
     strategy:
       runOnce:
         deploy:
